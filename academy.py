@@ -75,7 +75,8 @@ if df_academy.empty or df_all.empty:
     st.stop()
 
 # Fill missing stats with 0 (Keepers don't have goals, Outfielders don't have saves)
-df_academy.fillna(0, inplace=True)
+numeric_cols = df_academy.select_dtypes(include=['number']).columns
+df_academy[numeric_cols] = df_academy[numeric_cols].fillna(0)
 
 # 2. Merge Data
 df_merged = pd.merge(df_academy, df_all, on='name', how='inner')
