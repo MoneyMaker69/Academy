@@ -113,7 +113,6 @@ df_merged['Earned_TPE_7'] = earn_7
 df_merged['Earned_TPE_30'] = earn_30
 df_merged['Earned_TPE_All'] = earn_all
 
-# Helper dictionary to map the dropdown selections to the dataframe columns
 col_map = {
     "Last 7 Days": "Earned_TPE_7", 
     "Last 30 Days": "Earned_TPE_30", 
@@ -187,7 +186,6 @@ with tab1:
     with col1:
         st.subheader(f"🔥 Top 10 Earners")
         top_earners = df_merged[['name', 'club', 'tpe', target_col]].sort_values(by=target_col, ascending=False).reset_index(drop=True)
-        # Rename column for cleaner display
         top_earners = top_earners.rename(columns={target_col: 'TPE Earned'})
         st.dataframe(top_earners.head(10), use_container_width=True, hide_index=True)
     with col2:
@@ -258,27 +256,71 @@ with tab3:
 
 with tab4:
     st.header("Match Stats & Performance")
-    active_players = df_merged[df_merged['apps'] > 0]
-    colA, colB = st.columns(2)
-    with colA:
-        top_goals = active_players[['name', 'club', 'goals']].sort_values(by='goals', ascending=False).head(10)
-        fig_goals = px.bar(top_goals, x='name', y='goals', color='club', title="Top Goal Scorers", text_auto=True)
-        st.plotly_chart(fig_goals, use_container_width=True)
-        
-        top_rating = active_players[['name', 'club', 'average rating']].sort_values(by='average rating', ascending=False).head(10)
-        fig_rating = px.bar(top_rating, x='name', y='average rating', color='club', title="Highest Average Ratings", text_auto=True)
-        fig_rating.update_layout(yaxis=dict(range=[6, 10]))
-        st.plotly_chart(fig_rating, use_container_width=True)
+    active_players = df_merged[df_merged['apps'] > 0].copy()
+    
+    # A massive curated list of stats the user can choose to graph
+    match_stats_options = [
+        'goals', 'assists', 'average rating', 'xg', 'minutes played',
+        'player of the match', 'distance run (km)', 'shots on target', 'shots',
+        'successful passes', 'attempted passes', 'key passes', 'interceptions',
+        'clearances', 'tackles won', 'chances created', 'progressive passes'
+    ]
+    # Only show options that actually exist in the API data
+    available_stats = [s for s in match_stats_options if s in active_players.columns]
+    default_stats = [s for s in ['goals', 'assists', 'average rating', 'xg'] if s in available_stats]
+    
+    st.write("Customize your view: Select the stats you want to graph, and filter teams to instantly recalculate the leaderboard.")
+    
+    row1, row2 = st.columns(2)
+    with row1:
+        selected_stats = st.multiselect("Select Match Stats to Display:", available_stats, default=default_stats)
+    with row2:
+        all_teams = sorted(active_players['club'].unique())
+        selected_teams = st.multiselect("Filter Teams (Updates the Top 10):", all_teams, default=all_teams)
 
-    with colB:
-        top_assists = active_players[['name', 'club', 'assists']].sort_values(by='assists', ascending=False).head(10)
-        fig_assists = px.bar(top_assists, x='name', y='assists', color='club', title="Top Assist Providers", text_auto=True)
-        st.plotly_chart(fig_assists, use_container_width=True)
+    if not selected_stats or not selected_teams:
+        st.warning("Please select at least one stat and one team to view the charts.")
+    else:
+        # Create a clean grid for the charts
+        chart_cols = st.columns(2)
         
-        if 'xg' in active_players.columns:
-            top_xg = active_players[['name', 'club', 'xg']].sort_values(by='xg', ascending=False).head(10)
-            fig_xg = px.bar(top_xg, x='name', y='xg', color='club', title="Highest Expected Goals (xG)", text_auto='.2f')
-            st.plotly_chart(fig_xg, use_container_width=True)
+        for i, stat in enumerate(selected_stats):
+            # 1. Calculate Absolute Rank on the FULL dataset (before team filters)
+            # method='min' handles ties (e.g., if two players have 3 goals, they are both #2)
+            active_players[f'{stat}_rank'] = active_players[stat].rank(ascending=False, method='min').astype(int)
+            
+            # 2. Filter down to the selected teams
+            filtered_df = active_players[active_players['club'].isin(selected_teams)].copy()
+            
+            # 3. Sort by the stat and grab the Top 10
+            top_10 = filtered_df.sort_values(by=[stat, 'apps'], ascending=[False, True]).head(10)
+            
+            # 4. Attach the Absolute Rank to their name for the graph
+            top_10['display_name'] = "#" + top_10[f'{stat}_rank'].astype(str) + " " + top_10['name']
+            
+            # Format numbers cleanly: floats get 2 decimals, whole numbers get no decimals
+            text_format = '.2f' if stat in ['average rating', 'xg', 'distance run (km)'] else '.0f'
+            
+            # 5. Build the Chart
+            fig = px.bar(
+                top_10, 
+                x='display_name', 
+                y=stat, 
+                color='club', 
+                title=f"Top 10 {stat.replace('_', ' ').title()}", 
+                text_auto=text_format,
+                category_orders={'club': all_teams} # Keeps team colors strictly consistent
+            )
+            
+            # FIX: Force Plotly to sort strictly by size (Total Descending) instead of by color
+            fig.update_layout(
+                xaxis={'categoryorder':'total descending', 'title': ''},
+                yaxis={'title': stat.title()},
+                yaxis_range=[6, 10.5] if stat == 'average rating' else None
+            )
+            
+            with chart_cols[i % 2]:
+                st.plotly_chart(fig, use_container_width=True)
 
 with tab5:
     st.header("Team DNA & Attributes")
