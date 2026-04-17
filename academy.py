@@ -36,7 +36,6 @@ def get_tpe_history(player_name):
     return []
 
 def calculate_earn_rate(history_data, days=None):
-    """Calculates TPE earned in the last X days (or all time), ignoring starting TPE."""
     if not history_data:
         return 0
     try:
@@ -51,30 +50,32 @@ def calculate_earn_rate(history_data, days=None):
         
     earned = 0
     for i, entry in enumerate(sorted_hist):
-        if i == 0:
-            continue
+        change = entry.get('TPE Change', 0)
         source = str(entry.get('Source', '')).lower()
-        if 'initial' in source or 'creation' in source:
+        
+        # Exclude the very first entry, anything labeled initial, OR any massive lumps sums (safety net)
+        if i == 0 or 'initial' in source or 'creation' in source or change >= 150:
             continue
+            
         try:
             entry_date = datetime.strptime(entry['Time'], '%Y-%m-%d %H:%M:%S')
             if entry_date >= cutoff_date:
-                earned += entry.get('TPE Change', 0)
+                earned += change
         except Exception:
             pass
     return earned
 
-# --- MAIN APP LOGIC ---
-st.title("⚽ SSL Academy Tracker")
+# --- SIDEBAR SETTINGS ---
+st.sidebar.image("https://simulationsoccer.com/images/ssl_logo.png", width=150) # Optional: Adds a logo if the URL works
+st.sidebar.header("⚙️ Dashboard Settings")
 
-# App Settings / Timeframe Selector
-st.markdown("### ⚙️ Timeframe Settings")
-timeframe_str = st.radio(
-    "Select the timeframe for TPE Earn Rates:", 
+timeframe_str = st.sidebar.radio(
+    "Select TPE Earn Timeframe:", 
     ["Last 7 Days", "Last 30 Days", "All Time"], 
-    horizontal=True,
     index=1
 )
+
+st.sidebar.info("📌 **Note:** This timeframe ONLY affects TPE Earn Rates. Match stats, Team attributes, and Total TPE always display current season totals.")
 
 if timeframe_str == "Last 7 Days":
     days_filter = 7
@@ -82,6 +83,9 @@ elif timeframe_str == "Last 30 Days":
     days_filter = 30
 else:
     days_filter = None
+
+# --- MAIN APP LOGIC ---
+st.title("⚽ SSL Academy Tracker")
 
 with st.spinner("Fetching live data from SSL APIs..."):
     df_academy = get_academy_humans()
@@ -102,7 +106,7 @@ df_merged = df_merged.drop_duplicates(subset=['name'], keep='first')
 # Position Cleanup
 df_merged['Position'] = df_merged.apply(lambda row: row.get('position_y', row.get('position', 'Unknown')), axis=1)
 
-# Fetch Histories once and cache them in session state
+# Fetch Histories
 if 'histories' not in st.session_state:
     st.session_state.histories = {}
     progress_bar = st.progress(0, text="Fetching TPE histories for all players...")
@@ -112,7 +116,7 @@ if 'histories' not in st.session_state:
         progress_bar.progress((i + 1) / len(df_merged), text=f"Fetching history for {row['name']}...")
     progress_bar.empty()
 
-# Calculate dynamic earn rate based on the radio button selection
+# Calculate dynamic earn rate
 dynamic_earn_rates = []
 for i, row in df_merged.iterrows():
     hist = st.session_state.histories.get(row['name'], [])
@@ -131,10 +135,10 @@ for p_name, hist in st.session_state.histories.items():
                 dt = datetime.strptime(entry['Time'], '%Y-%m-%d %H:%M:%S')
                 change = entry.get('TPE Change', 0)
                 source = str(entry.get('Source', '')).lower()
-                is_initial = (i == 0) or ('initial' in source) or ('creation' in source)
+                is_initial = (i == 0) or ('initial' in source) or ('creation' in source) or (change >= 150)
                 timeline_records.append({
                     'Player': p_name, 'Team': team, 'Date': dt, 
-                    'Week_Start': dt - timedelta(days=dt.weekday()), # Monday
+                    'Week_Start': dt - timedelta(days=dt.weekday()), 
                     'Change': change, 'Is_Initial': is_initial
                 })
             except: pass
@@ -154,13 +158,9 @@ if not df_hist.empty:
         team_hist = df_hist[df_hist['Team'] == team]
         
         for w in weeks:
-            # Gain excludes initial TPE
             gain = team_hist[(team_hist['Week_Start'] == w) & (~team_hist['Is_Initial'])]['Change'].sum()
-            
-            # Total TPE end of week = Current TPE minus all changes that happened AFTER this week
             end_of_week = pd.to_datetime(w) + pd.Timedelta(days=6, hours=23, minutes=59, seconds=59)
             future_changes = team_hist[team_hist['Date'] > end_of_week]['Change'].sum()
-            
             total_tpe = current_team_tpe - future_changes
             avg_tpe = total_tpe / num_players if num_players > 0 else 0
             
@@ -204,7 +204,6 @@ with tab2:
 with tab3:
     st.header("Team TPE Overview")
     
-    # 1. Bar Charts Snapshot
     st.subheader(f"Current Snapshot ({timeframe_str})")
     team_stats = df_merged.groupby('club').agg(
         Total_TPE=('tpe', 'sum'),
@@ -226,7 +225,6 @@ with tab3:
 
     st.markdown("---")
 
-    # 2. Line Charts Timeline
     st.subheader("Trends Over Time (Weekly)")
     if not df_timeline.empty:
         fig_line1 = px.line(df_timeline, x='Week', y='Total TPE', color='Team', markers=True, title='Total Team TPE (Progression Over Time)')
