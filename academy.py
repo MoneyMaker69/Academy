@@ -81,6 +81,9 @@ df_academy[numeric_cols] = df_academy[numeric_cols].fillna(0)
 # 2. Merge Data
 df_merged = pd.merge(df_academy, df_all, on='name', how='inner')
 
+# Drop any duplicate players that the API accidentally sent us
+df_merged = df_merged.drop_duplicates(subset=['name'], keep='first')
+
 # 3. Calculate TPE Earn Rates
 if 'earn_rate_30d' not in st.session_state:
     earn_rates = []
