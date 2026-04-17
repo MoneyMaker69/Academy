@@ -65,24 +65,6 @@ def calculate_earn_rate(history_data, days=None):
             pass
     return earned
 
-# --- SIDEBAR SETTINGS ---
-st.sidebar.image("https://simulationsoccer.com/images/ssl_logo.png", width=150) # Optional: Adds a logo if the URL works
-st.sidebar.header("⚙️ Dashboard Settings")
-
-timeframe_str = st.sidebar.radio(
-    "Select TPE Earn Timeframe:", 
-    ["Last 7 Days", "Last 30 Days", "All Time"], 
-    index=1
-)
-
-st.sidebar.info("📌 **Note:** This timeframe ONLY affects TPE Earn Rates. Match stats, Team attributes, and Total TPE always display current season totals.")
-
-if timeframe_str == "Last 7 Days":
-    days_filter = 7
-elif timeframe_str == "Last 30 Days":
-    days_filter = 30
-else:
-    days_filter = None
 
 # --- MAIN APP LOGIC ---
 st.title("⚽ SSL Academy Tracker")
@@ -116,13 +98,27 @@ if 'histories' not in st.session_state:
         progress_bar.progress((i + 1) / len(df_merged), text=f"Fetching history for {row['name']}...")
     progress_bar.empty()
 
-# Calculate dynamic earn rate
-dynamic_earn_rates = []
+# Calculate ALL timeframes upfront for instant tab switching
+earn_7 = []
+earn_30 = []
+earn_all = []
+
 for i, row in df_merged.iterrows():
     hist = st.session_state.histories.get(row['name'], [])
-    rate = calculate_earn_rate(hist, days=days_filter)
-    dynamic_earn_rates.append(rate)
-df_merged['Earned_TPE'] = dynamic_earn_rates
+    earn_7.append(calculate_earn_rate(hist, days=7))
+    earn_30.append(calculate_earn_rate(hist, days=30))
+    earn_all.append(calculate_earn_rate(hist, days=None))
+
+df_merged['Earned_TPE_7'] = earn_7
+df_merged['Earned_TPE_30'] = earn_30
+df_merged['Earned_TPE_All'] = earn_all
+
+# Helper dictionary to map the dropdown selections to the dataframe columns
+col_map = {
+    "Last 7 Days": "Earned_TPE_7", 
+    "Last 30 Days": "Earned_TPE_30", 
+    "All Time": "Earned_TPE_All"
+}
 
 # --- BUILD TIMELINE DATA FOR LINE GRAPHS ---
 timeline_records = []
@@ -144,8 +140,8 @@ for p_name, hist in st.session_state.histories.items():
             except: pass
 
 df_hist = pd.DataFrame(timeline_records)
-
 team_timeline_data = []
+
 if not df_hist.empty:
     df_hist['Week_Start'] = pd.to_datetime(df_hist['Week_Start']).dt.date
     weeks = sorted(df_hist['Week_Start'].dropna().unique())
@@ -183,44 +179,66 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 with tab1:
-    st.header(f"Rookie TPE Leaderboards ({timeframe_str})")
+    st.header("Rookie TPE Leaderboards")
+    tf1 = st.radio("Select Timeframe:", ["Last 7 Days", "Last 30 Days", "All Time"], horizontal=True, index=1, key="tf1")
+    target_col = col_map[tf1]
+    
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.subheader("🔥 Top 10 Earners")
-        top_earners = df_merged[['name', 'club', 'tpe', 'Earned_TPE']].sort_values(by='Earned_TPE', ascending=False).reset_index(drop=True)
+        st.subheader(f"🔥 Top 10 Earners")
+        top_earners = df_merged[['name', 'club', 'tpe', target_col]].sort_values(by=target_col, ascending=False).reset_index(drop=True)
+        # Rename column for cleaner display
+        top_earners = top_earners.rename(columns={target_col: 'TPE Earned'})
         st.dataframe(top_earners.head(10), use_container_width=True, hide_index=True)
     with col2:
         st.subheader("All Academy Players")
-        display_cols = ['name', 'club', 'Position', 'tpe', 'Earned_TPE', 'apps', 'average rating']
-        st.dataframe(df_merged[display_cols].sort_values('tpe', ascending=False), use_container_width=True, hide_index=True)
+        display_cols = ['name', 'club', 'Position', 'tpe', target_col, 'apps', 'average rating']
+        display_df = df_merged[display_cols].rename(columns={target_col: 'TPE Earned'})
+        st.dataframe(display_df.sort_values('tpe', ascending=False), use_container_width=True, hide_index=True)
 
 with tab2:
     st.header("Team Rosters")
+    tf2 = st.radio("Select Earn Rate Timeframe:", ["Last 7 Days", "Last 30 Days", "All Time"], horizontal=True, index=1, key="tf2")
+    target_col = col_map[tf2]
+    
     selected_team = st.selectbox("Filter by Team:", options=sorted(df_merged['club'].unique()))
     roster_df = df_merged[df_merged['club'] == selected_team]
-    display_cols = ['name', 'Position', 'tpe', 'Earned_TPE', 'apps', 'goals', 'assists', 'average rating']
-    st.dataframe(roster_df[display_cols].sort_values('tpe', ascending=False), use_container_width=True, hide_index=True)
+    
+    display_cols = ['name', 'Position', 'tpe', target_col, 'apps', 'goals', 'assists', 'average rating']
+    display_df = roster_df[display_cols].rename(columns={target_col: 'TPE Earned'})
+    
+    st.dataframe(display_df.sort_values('tpe', ascending=False), use_container_width=True, hide_index=True)
 
 with tab3:
     st.header("Team TPE Overview")
     
-    st.subheader(f"Current Snapshot ({timeframe_str})")
+    st.subheader("Current Snapshot")
+    tf3 = st.radio("Select Timeframe for Earn Rates:", ["Last 7 Days", "Last 30 Days", "All Time"], horizontal=True, index=1, key="tf3")
+    target_col = col_map[tf3]
+    
     team_stats = df_merged.groupby('club').agg(
         Total_TPE=('tpe', 'sum'),
         Average_TPE=('tpe', 'mean'),
-        Total_Earn_Rate=('Earned_TPE', 'sum'),
-        Average_Earn_Rate=('Earned_TPE', 'mean'),
+        Total_Earn_Rate=(target_col, 'sum'),
+        Average_Earn_Rate=(target_col, 'mean'),
     ).reset_index()
+    
     c1, c2 = st.columns(2)
     with c1:
         fig1 = px.bar(team_stats, x='club', y='Total_TPE', title="Current Total TPE by Team", color='club', text_auto='.0f')
+        fig1.update_layout(showlegend=False)
         st.plotly_chart(fig1, use_container_width=True)
-        fig3 = px.bar(team_stats, x='club', y='Total_Earn_Rate', title=f"Total TPE Earned ({timeframe_str})", color='club', text_auto='.0f')
+        
+        fig3 = px.bar(team_stats, x='club', y='Total_Earn_Rate', title=f"Total TPE Earned ({tf3})", color='club', text_auto='.0f')
+        fig3.update_layout(showlegend=False)
         st.plotly_chart(fig3, use_container_width=True)
     with c2:
         fig2 = px.bar(team_stats, x='club', y='Average_TPE', title="Current Average TPE per Player", color='club', text_auto='.0f')
+        fig2.update_layout(showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
-        fig4 = px.bar(team_stats, x='club', y='Average_Earn_Rate', title=f"Average Earn Rate ({timeframe_str})", color='club', text_auto='.1f')
+        
+        fig4 = px.bar(team_stats, x='club', y='Average_Earn_Rate', title=f"Average Earn Rate ({tf3})", color='club', text_auto='.1f')
+        fig4.update_layout(showlegend=False)
         st.plotly_chart(fig4, use_container_width=True)
 
     st.markdown("---")
@@ -284,12 +302,16 @@ with tab5:
 with tab6:
     st.header("Player Deep Dive")
     selected_player = st.selectbox("Search for a Player", options=df_merged['name'].sort_values())
+    
     if selected_player:
         player_data = df_merged[df_merged['name'] == selected_player].iloc[0]
         
+        tf6 = st.radio("Select Earn Rate Timeframe:", ["Last 7 Days", "Last 30 Days", "All Time"], horizontal=True, index=1, key="tf6")
+        target_col = col_map[tf6]
+        
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Current TPE", player_data['tpe'])
-        c2.metric(f"Earn Rate ({timeframe_str})", player_data['Earned_TPE'])
+        c2.metric(f"Earn Rate ({tf6})", player_data[target_col])
         c3.metric("Team", player_data['club'])
         c4.metric("Position", player_data['Position'])
         
