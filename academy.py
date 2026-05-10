@@ -86,13 +86,17 @@ df_academy[numeric_cols] = df_academy[numeric_cols].fillna(0)
 df_academy['match_name'] = df_academy['name'].astype(str).str.strip().str.lower()
 df_all['match_name'] = df_all['name'].astype(str).str.strip().str.lower()
 
+# Rename the academy's name column so we strictly keep the Portal's official name
+df_academy = df_academy.rename(columns={'name': 'sim_name'})
+
 # Merge using the cleaned names, then drop the temporary matching column
-df_merged = pd.merge(df_academy, df_all.drop(columns=['name']), left_on='match_name', right_on='match_name', how='inner')
+df_merged = pd.merge(df_academy, df_all, on='match_name', how='inner')
 df_merged = df_merged.drop(columns=['match_name'])
 df_merged = df_merged.drop_duplicates(subset=['name'], keep='first')
 
 # Position Cleanup
 df_merged['Position'] = df_merged.apply(lambda row: row.get('position_y', row.get('position', 'Unknown')), axis=1)
+
 
 # --- THE PROGRESS BAR CRASH FIX ---
 # Fetch Histories
