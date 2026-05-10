@@ -81,21 +81,29 @@ if df_academy.empty or df_all.empty:
 numeric_cols = df_academy.select_dtypes(include=['number']).columns
 df_academy[numeric_cols] = df_academy[numeric_cols].fillna(0)
 
-# Merge Data & Remove Duplicates
-df_merged = pd.merge(df_academy, df_all, on='name', how='inner')
+# --- THE "IGNIGNOKT" SINGLE NAME FIX ---
+# Clean up names to remove invisible spaces and ignore capital letters before merging
+df_academy['match_name'] = df_academy['name'].astype(str).str.strip().str.lower()
+df_all['match_name'] = df_all['name'].astype(str).str.strip().str.lower()
+
+# Merge using the cleaned names, then drop the temporary matching column
+df_merged = pd.merge(df_academy, df_all.drop(columns=['name']), left_on='match_name', right_on='match_name', how='inner')
+df_merged = df_merged.drop(columns=['match_name'])
 df_merged = df_merged.drop_duplicates(subset=['name'], keep='first')
 
 # Position Cleanup
 df_merged['Position'] = df_merged.apply(lambda row: row.get('position_y', row.get('position', 'Unknown')), axis=1)
 
+# --- THE PROGRESS BAR CRASH FIX ---
 # Fetch Histories
 if 'histories' not in st.session_state:
     st.session_state.histories = {}
     progress_bar = st.progress(0, text="Fetching TPE histories for all players...")
-    for i, row in df_merged.iterrows():
-        hist = get_tpe_history(row['name'])
-        st.session_state.histories[row['name']] = hist
-        progress_bar.progress((i + 1) / len(df_merged), text=f"Fetching history for {row['name']}...")
+    
+    # Using enumerate here ensures the counter goes 1, 2, 3 safely without relying on Pandas row IDs
+    for count, (_, row) in enumerate(df_merged.iterrows()):
+        st.session_state.histories[row['name']] = get_tpe_history(row['name'])
+        progress_bar.progress((count + 1) / len(df_merged), text=f"Fetching history for {row['name']}...")
     progress_bar.empty()
 
 # Calculate ALL timeframes upfront for instant tab switching
